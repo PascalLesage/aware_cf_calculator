@@ -1,0 +1,12 @@
+# Default ignored files
+.ipynb_checkpoints/
+.idea/
+.git/
+.pytest_cache/
+__pycache__/
+notes.txt
+aware_cf_calculator.egg-info/
+notebooks/
+old_notebooks/
+paper/
+
