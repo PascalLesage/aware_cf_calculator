@@ -86,6 +86,10 @@ class AwareStochastic(AwareStatic):
                 self.log["iterations"] = 1000
             else:
                 self.log["iterations"] = iterations
+            if not self.caps:
+                self.log["caps"] = {}
+            else:
+                self.log["caps"] = self.caps
             with open(self.log_fp, "wb") as f:
                 pickle.dump(self.log, f)
         else:
@@ -311,7 +315,8 @@ class AwareStochastic(AwareStatic):
 
         for variable in [
             f for f in self.given_variable_names
-            if f != 'area']:
+            if f != 'area'
+        ]:
             if variable not in self.consider_certain:
                 data_d_MC[variable] = AwareStochastic.update_df_with_sample(
                     self.samples_indices_dict[variable],
@@ -650,3 +655,41 @@ class AwareStochastic(AwareStatic):
                     arr = np.load(f)
                     np.savetxt(save_dir / f.name.replace('npy', 'csv'), arr, delimiter=',')
 
+    def convert_intermediates_to_csv(self):
+        """ Convert numpy arrays of intermediate values to CSV"""
+
+        intermediate_dir = self.aggregated_samples
+        if not intermediate_dir.is_dir():
+            warnings.warn("No data found in directory {}. No csv generated.".format(str(intermediate_dir)))
+            return
+        for aggregate_type in [
+            "AMD_world",
+            "AMD_world_over_AMD_i",
+            "HWC",
+            "irrigation"
+        ]:
+            np_dir = intermediate_dir / aggregate_type
+            if not np_dir.is_dir():
+                warnings.warn("Data in npy version do not exist for {}. No csv generated".format(aggregate_type))
+                continue
+            else:
+                save_dir = self.sim_dir / "csv" / aggregate_type
+                save_dir.mkdir(parents=True, exist_ok=True)
+                for f in [f for f in np_dir.iterdir()]:
+                    arr = np.load(f)
+                    np.savetxt(save_dir / f.name.replace('npy', 'csv'), arr, delimiter=',')
+
+    def convert_sampled_to_csv(self):
+        """ Return an array of sampled data"""
+        for variable in self.given_variable_names:
+            if variable == 'area':
+                continue
+            print(variable)
+            with open(self.indices_dir/"{}.pickle".format(variable), 'rb') as f:
+                indices = pickle.load(f)
+            arr = np.load(self.samples_dir/"{}.npy".format(variable))
+            df = pd.DataFrame(index=indices, data=arr)
+            df.reset_index(inplace=True)
+            csv_dir = self.sim_dir/'csv'
+            csv_dir.mkdir(exist_ok=True)
+            df.to_csv(csv_dir/"{}.csv".format(variable))
