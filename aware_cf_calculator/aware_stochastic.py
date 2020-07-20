@@ -32,7 +32,7 @@ class AwareStochastic(AwareStatic):
 
     """
 
-    def __init__(self, base_dir_path, sim_name="all_random", consider_certain=[], iterations=1000):
+    def __init__(self, base_dir_path, sim_name="all_random", consider_certain=[], iterations=1000, caps={}):
         """ Creates core attributes and generates samples if they do not already exist.
 
         Subclasses AwareStatic class, which provides independent variables and
@@ -55,11 +55,14 @@ class AwareStochastic(AwareStatic):
             which the static value will be used in calculations
         iterations: int
             Number of iterations to use in the Monte Carlo Simulations
-
+        caps: dict {str: float}
+            Upper bound to programatically impose on GSD2 values for specified
+            parameters
         """
         AwareStatic.__init__(self, base_dir_path)
         self.consider_certain = consider_certain
         self.sim_name = sim_name
+        self.caps = caps
         self.specify_MC_paths()
         self.generate_base_log_file(consider_certain, iterations)
         self.iterations = self.log['iterations']
@@ -234,11 +237,63 @@ class AwareStochastic(AwareStatic):
             else:
                 indices_as_list = list(df_only_uncertain['BAS34S_ID'].values)
 
-            np.save(self.samples_dir / "{}.npy".format(variable), arr)
-            with open(self.indices_dir / "{}.pickle".format(variable), 'wb') as f:
+            name = variable + "_wo_model_uncertainty" if variable in ['avail_net', 'avail_delta'] else variable
+            np.save(self.samples_dir / "{}.npy".format(name), arr)
+            with open(self.indices_dir / "{}.pickle".format(name), 'wb') as f:
                 pickle.dump(indices_as_list, f)
-            print("\t{} samples taken for {}".format(self.iterations, variable))
+            print("\t{} samples taken for {}".format(self.iterations, name))
+        self.sample_model_uncertainty()
         self.samples_generated = True
+
+    def sample_model_uncertainty(self):
+        """ Sample model uncertainty for avail_delta and avail_net"""
+        with open(self.filtered_pickles / 'model_uncertainty.pickle', 'rb') as f:
+            model_uncertainty_df = pickle.load(f)
+        if self.caps and 'model_uncertainty' in self.caps:
+            model_uncertainty_df[model_uncertainty_df>self.caps['model_uncertainty']] = self.caps['model_uncertainty']
+        stacked_df = model_uncertainty_df.stack().reset_index()
+        stacked_df.rename(columns={'level_1': 'month', 0: 'value'}, inplace=True)
+        gsd2_to_scale = lambda x: np.log(np.sqrt(x))
+        stacked_df['scale'] = gsd2_to_scale(stacked_df['value'])
+        stats_arrays_input_dicts = [{'loc': 0, 'scale': stacked_df.loc[i, 'scale'], 'uncertainty_type': 2} for i in
+                                    stacked_df.index]
+        uncertainty_base = UncertaintyBase.from_dicts(*stats_arrays_input_dicts)
+        rng = MCRandomNumberGenerator(uncertainty_base)
+        arr = np.zeros(shape=[stacked_df.shape[0], self.iterations])
+        for iteration in range(self.iterations):
+            arr[:, iteration] = next(rng)
+        indices_as_arr = np.array([stacked_df['BAS34S_ID'], stacked_df['month']]).T
+        indices_as_list = [(indices_as_arr[i, 0], indices_as_arr[i, 1]) for i in range(indices_as_arr.shape[0])]
+        np.save(self.samples_dir / "{}.npy".format('model_uncertainty'), arr)
+        with open(self.indices_dir / "{}.pickle".format('model_uncertainty'), 'wb') as f:
+            pickle.dump(indices_as_list, f)
+        print("\t{} samples taken for {}".format(self.iterations, 'model_uncertainty'))
+
+    def add_model_uncertainty_to_avail(self):
+        """ Add model uncertainty to avail_delta and avail_net
+        """
+        model_uncertainty_df = pd.DataFrame(
+            index=pickle.load(open(self.indices_dir/'model_uncertainty.pickle', 'rb')),
+            data=np.load(self.samples_dir/'model_uncertainty.npy')
+        )
+        for variable in ['avail_net', 'avail_delta']:
+            param_uncertainty_df = pd.DataFrame(
+                index=pickle.load(open(self.indices_dir / '{}_wo_model_uncertainty.pickle'.format(variable), 'rb')),
+                data=np.load(self.samples_dir / '{}_wo_model_uncertainty.npy'.format(variable)),
+            )
+            # Make sure that we have model uncertainty samples for all basin-months with parameter uncertainty
+            assert 0 == np.setdiff1d(
+                param_uncertainty_df.index.tolist(),
+                model_uncertainty_df.index.tolist(),
+                assume_unique=True).size
+            # Make sure that all the basin-months for which we do not have parameter uncertainty are indeed for basin-months with 0 values
+            det_df = pd.read_pickle(self.filtered_pickles / "{}.pickle".format(variable)).stack()
+            assert det_df.loc[model_uncertainty_df.index.difference(det_df.index)].sum() == 0
+            product = (param_uncertainty_df * model_uncertainty_df).reindex(param_uncertainty_df.index).dropna(axis=1)
+            with open(self.indices_dir/"{}.pickle".format(variable), "wb") as f:
+                pickle.dump(product.index.to_list(), f)
+            np.save(self.samples_dir/"{}.npy".format(variable), product.values)
+
 
     @staticmethod
     def update_df_with_sample(sample_index, sample_values, det_df):
