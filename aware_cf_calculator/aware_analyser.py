@@ -103,32 +103,50 @@ class AwareAnalyser(AwareStochastic):
 
 
         # Set up figure
-        fig, axarr = plt.subplots(6, 3)
+        fig, axarr = plt.subplots(7, 3)
         fig.subplots_adjust(hspace=1, wspace=0.4)
-        fig.set_size_inches(8, 10.5)
+        fig.set_size_inches(8, 14.5)
 
         # Get and plot given variable samples
         input_arrs = {}
-        variables = copy.copy(self.given_variable_names)
-        variables.remove('area')
+        #variables = copy.copy(self.given_variable_names)
+        variables = [
+                "avail_delta_wo_model_uncertainty",
+                "avail_net_wo_model_uncertainty",
+                "model_uncertainty",
+                "avail_delta",
+                "avail_net",
+                "domestic",
+                "electricity",
+                "irrigation",
+                "livestock",
+                "manufacturing",
+                "pastor",
+        ]
+
         for i, v in enumerate(variables):
-            ax = plt.subplot(6, 3, i + 1)
+            ax = plt.subplot(7, 3, i + 1)
             arr = self.get_arr_sampled_data(v, basin, month)
             if arr is not None:
                 input_arrs[v] = arr
-                ax.hist(arr, density=True, histtype="step", bins=50)
+                ax.hist(arr, density=False, histtype="step", bins=100)
                 ax.yaxis.set_visible(False)
                 if v != 'pastor':
                     ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
             else:
                 input_arrs[v] = np.zeros(shape=self.iterations) # This should probably be det values, not 0s
                 ax.yaxis.set_visible(False)
-            ax.set_title(v)
-            if v in ['irrigation', 'avail_delta', 'avail_net']:
+            if v == 'avail_delta_wo_model_uncertainty':
+                ax.set_title("avail_delta\nwo_model_uncertainty")
+            elif v == 'avail_net_wo_model_uncertainty':
+                ax.set_title("avail_net\nwo_model_uncertainty")
+            else:
+                ax.set_title(v)
+            if v in ['irrigation', 'avail_delta', 'avail_net', 'avail_delta_wo_model_uncertainty', 'avail_net_wo_model_uncertainty']:
                 ax.set_xlabel('[m3/month]')
             elif v in ['electricity', 'domestic', 'livestock', 'manufacturing']:
                 ax.set_xlabel('[m3/year]')
-            elif v == 'pastor':
+            elif v in ['pastor', 'model_uncertainty']:
                 ax.set_xlabel('[unitless]')
             else:
                 print("Couldn't find unit for ", v)
@@ -145,8 +163,8 @@ class AwareAnalyser(AwareStochastic):
 
         # Plot intermediate variables
         # HWC
-        ax = plt.subplot(6, 3, 9)
-        ax.hist(HWC, density=True, histtype="step", bins=50)
+        ax = plt.subplot(7, 3, 12)
+        ax.hist(HWC, density=False, histtype="step", bins=50)
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         ax.set_xlabel('[m3/month]')
@@ -154,8 +172,8 @@ class AwareAnalyser(AwareStochastic):
         ax.set_title("HWC")
 
         # Avail before human consumption
-        ax = plt.subplot(6, 3, 10)
-        ax.hist(avail_before_human_consumption, density=True, histtype="step", bins=50)
+        ax = plt.subplot(7, 3, 13)
+        ax.hist(avail_before_human_consumption, density=False, histtype="step", bins=50)
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         ax.set_xlabel('[m3/month]')
@@ -163,8 +181,8 @@ class AwareAnalyser(AwareStochastic):
         ax.set_title("Availability before HC")
 
         # Pristine
-        ax = plt.subplot(6, 3, 11)
-        ax.hist(pristine, density=True, histtype="step", bins=50)
+        ax = plt.subplot(7, 3, 14)
+        ax.hist(pristine, density=False, histtype="step", bins=50)
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         ax.yaxis.set_visible(False)
@@ -172,8 +190,8 @@ class AwareAnalyser(AwareStochastic):
         ax.set_title("Pristine")
 
         # EWR
-        ax = plt.subplot(6, 3, 12)
-        ax.hist(EWR, density=True, histtype="step", bins=50)
+        ax = plt.subplot(7, 3, 15)
+        ax.hist(EWR, density=False, histtype="step", bins=50)
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         ax.yaxis.set_visible(False)
@@ -181,8 +199,8 @@ class AwareAnalyser(AwareStochastic):
         ax.set_title("EWR")
 
         # AMD
-        ax = plt.subplot(6, 3, 13)
-        ax.hist(AMD_per_m2, density=True, histtype="step", bins=50)
+        ax = plt.subplot(7, 3, 16)
+        ax.hist(AMD_per_m2, density=False, histtype="step", bins=50)
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
         ax.yaxis.set_visible(False)
@@ -190,12 +208,12 @@ class AwareAnalyser(AwareStochastic):
         ax.set_title("AMD per m2")
 
         # AMD_world_over_AMD_i
-        ax = plt.subplot(6, 3, 14)
+        ax = plt.subplot(7, 3, 17)
         ax.hist(
             np.load(
                 self.aggregated_samples / "AMD_world_over_AMD_i" / "AMD_world_over_AMD_i_{}_{}.npy".format(
                     basin, month)),
-            density=True, histtype="step", bins=50
+            density=False, histtype="step", bins=50
         )
         ax.set_title("AMD_world_over_AMD_i")
         ax.yaxis.set_visible(False)
@@ -204,12 +222,12 @@ class AwareAnalyser(AwareStochastic):
         ax.set_xlabel('[unitless]')
 
         # CF for month
-        ax = plt.subplot(6, 3, 15)
+        ax = plt.subplot(7, 3, 18)
         ax.hist(
             np.load(
                 self.cf_dir / "{}_{}".format(lower_bound, upper_bound).replace(".", "_")/ "monthly" / "cf_{}_{}.npy".format(
                     basin, month)),
-            density=True, histtype="step", bins=50
+            density=False, histtype="step", bins=50
         )
         ax.yaxis.set_visible(False)
         ax.set_title("CF for month")
@@ -217,13 +235,13 @@ class AwareAnalyser(AwareStochastic):
         ax.set_xlabel('[unitless]')
 
         # CF unknown
-        ax = plt.subplot(6, 3, 16)
+        ax = plt.subplot(7, 3, 19)
         ax.hist(
             np.load(
                 self.cf_dir / "{}_{}".format(
                     lower_bound, upper_bound).replace(".", "_") / "average_unknown" / "cf_average_unknown_{}.npy".format(
                     basin)),
-            density=True, histtype="step", bins=50
+            density=False, histtype="step", bins=50
         )
         ax.set_title("CF average unknown")
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
@@ -231,14 +249,14 @@ class AwareAnalyser(AwareStochastic):
         ax.set_xlabel('[unitless]')
 
         # CF agri
-        ax = plt.subplot(6, 3, 17)
+        ax = plt.subplot(7, 3, 20)
         ax.hist(
             np.load(
                 self.cf_dir / "{}_{}".format(
                     lower_bound, upper_bound).replace(".", "_") / "average_agri" / "cf_average_agri_{}.npy".format(
                         basin)
             ),
-            density=True, histtype="step", bins=50
+            density=False, histtype="step", bins=50
         )
         ax.set_title("CF average agri")
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
@@ -246,14 +264,14 @@ class AwareAnalyser(AwareStochastic):
         ax.set_xlabel('[unitless]')
 
         # CF non_agri
-        ax = plt.subplot(6, 3, 18)
+        ax = plt.subplot(7, 3, 21)
         ax.hist(
             np.load(
                 self.cf_dir / "{}_{}".format(
                     lower_bound, upper_bound).replace(".", "_") / "average_non_agri" / "cf_average_non_agri_{}.npy".format(
                     basin)
             ),
-            density=True, histtype="step", bins=50
+            density=False, histtype="step", bins=50
         )
         ax.set_title("CF average non agri")
         ax.yaxis.set_visible(False)
@@ -267,6 +285,7 @@ class AwareAnalyser(AwareStochastic):
             fig.savefig(save_dir / "all_hists_{}_{}.jpeg".format(basin, month), bbox_inches="tight")
         if return_graph:
             return fig
+
 
     def get_all_arrays(self, basin, month, lower_bound, upper_bound,
                                              return_df=True, save_xls=False):
@@ -332,7 +351,9 @@ class AwareAnalyser(AwareStochastic):
         else:
             return None
 
-    def get_stochastic_array(self, result_type, basin, month=None, lower_bound=None, upper_bound=None, iterations_limiter=None):
+    def get_stochastic_array(self, result_type, basin, month=None,
+                             lower_bound=None, upper_bound=None,
+                             iterations_limiter=None, dtype=np.float32):
         """ Return array of precalculated results for given basin and month"""
 
         if result_type not in self.valid_result_types:
@@ -391,9 +412,11 @@ class AwareAnalyser(AwareStochastic):
         else:
             file = result_dir / file_base.format(basin)
 
-        return np.load(file)[0:iterations]
+        return np.load(file)[0:iterations].astype(dtype)
 
-    def build_stochastic_result_df(self, result_type, basins="all", months="all", lower_bound=0.1, upper_bound=100, iterations_limiter=None):
+    def build_stochastic_result_df(self, result_type, basins="all", months="all",
+                                   lower_bound=0.1, upper_bound=100,
+                                   iterations_limiter=None, dtype=np.float32):
         """ Concatenate all samples for a given type of results in a tidy DataFrame
 
         Supported result types (passed as string):
@@ -422,7 +445,7 @@ class AwareAnalyser(AwareStochastic):
                 arr = self.get_stochastic_array(
                     result_type=result_type, basin=basin, month=month,
                     lower_bound=lower_bound, upper_bound=upper_bound,
-                    iterations_limiter=iterations_limiter
+                    iterations_limiter=iterations_limiter, dtype=dtype
                 )
 
                 df = pd.DataFrame()
@@ -451,7 +474,7 @@ class AwareAnalyser(AwareStochastic):
         return result
 
     def pair_violins_indicator_distribution(self, result_type, basins='all', months='all',
-                                            lower_bound=0.1, upper_bound=100,
+                                            lower_bound=0.1, upper_bound=100, dtype=np.float32,
                                             include_median=False, save_fig=True, return_fig=False):
         """ Plot distribution of static and stochastic results side by side"""
         self.check_result_type(result_type)
@@ -472,7 +495,7 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None)
+                iterations_limiter=None, dtype=dtype)
 
         elif result_type == 'average_agri_cf':
             title = "Average CF (agri)"
@@ -485,7 +508,7 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None)
+                iterations_limiter=None, dtype=dtype)
 
         elif result_type == 'average_non_agri_cf':
             title = "Average CF (non agri)"
@@ -498,7 +521,7 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None)
+                iterations_limiter=None, dtype=dtype)
 
         elif result_type == 'monthly_cf_all':
             title = "All monthly CFs"
@@ -511,7 +534,7 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins, months=months,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None)
+                iterations_limiter=None, dtype=dtype)
 
         elif result_type == 'AMD_world_over_AMD_i':
             title = "All monthly AMD world / AMD i"
@@ -524,7 +547,7 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins, months=months,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None)
+                iterations_limiter=None, dtype=dtype)
 
         else:
             raise NotImplemented("Result type {} not understood, accepted result types are: "
@@ -629,7 +652,7 @@ class AwareAnalyser(AwareStochastic):
     def get_full_stats(self, result_type, basins="all", months='all',
                        lower_bound=0.1, upper_bound=100,
                        aggregate_by_static=False, augment_with_dispersion=True,
-                       iterations_limiter=None):
+                       iterations_limiter=None, dtype=np.float32):
         """ get summary df for plotting results
 
             if aggregate_by_static, statistics will be calculated for all samples
@@ -651,7 +674,8 @@ class AwareAnalyser(AwareStochastic):
                 basins=basins,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
-                iterations_limiter=iterations_limiter
+                iterations_limiter=iterations_limiter,
+                dtype=dtype
             )
 
         elif result_type == 'average_agri_cf':
@@ -664,7 +688,8 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=iterations_limiter
+                iterations_limiter=iterations_limiter,
+                dtype=dtype
             )
 
         elif result_type == 'average_non_agri_cf':
@@ -677,7 +702,8 @@ class AwareAnalyser(AwareStochastic):
                 result_type,
                 basins=basins,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=iterations_limiter
+                iterations_limiter=iterations_limiter,
+                dtype=dtype
             )
 
         elif result_type == 'monthly_cf_all':
@@ -690,7 +716,8 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins, months=months,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None
+                iterations_limiter=None,
+                dtype=dtype
             )
 
         elif result_type == 'AMD_world_over_AMD_i':
@@ -702,7 +729,8 @@ class AwareAnalyser(AwareStochastic):
                 result_type=result_type,
                 basins=basins, months=months,
                 lower_bound=lower_bound, upper_bound=upper_bound,
-                iterations_limiter=None
+                iterations_limiter=None,
+                dtype=dtype
             )
 
         else:
@@ -941,10 +969,9 @@ class AwareAnalyser(AwareStochastic):
         if month not in self.months:
             raise ValueError('Month {} not a valid month name'.format(month))
 
-        parameters = [p for p in self.given_variable_names if p!='area']
-        indices = {param: pickle.load(open(self.indices_dir / "{}.pickle".format(param), 'rb')) for param in parameters}
+        indices = {param: pickle.load(open(self.indices_dir / "{}.pickle".format(param), 'rb')) for param in self.sampled_variables}
         samples = {param: np.load(str(self.samples_dir / "{}.npy".format(param)), mmap_mode='r') for param in
-                   parameters}
+                   self.sampled_variables}
 
         output = self.get_stochastic_array(
                     result_type=result_type, basin=basin, month=month,
@@ -955,7 +982,7 @@ class AwareAnalyser(AwareStochastic):
         to_send_to_analysis = {}
         skipped = []
 
-        for param in parameters:
+        for param in self.sampled_variables:
             param_one_d = not isinstance(indices[param][0], tuple)
             if param_one_d:
                 try:

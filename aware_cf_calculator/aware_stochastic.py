@@ -11,6 +11,8 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 import datetime
 import warnings
+from math import ceil
+import sys
 
 
 class AwareStochastic(AwareStatic):
@@ -32,7 +34,9 @@ class AwareStochastic(AwareStatic):
 
     """
 
-    def __init__(self, base_dir_path, sim_name="all_random", consider_certain=[], iterations=1000):
+    def __init__(self, base_dir_path, sim_name="all_random",
+                 consider_certain=[], iterations=1000, caps={},
+                 dtype='float64'):
         """ Creates core attributes and generates samples if they do not already exist.
 
         Subclasses AwareStatic class, which provides independent variables and
@@ -55,14 +59,30 @@ class AwareStochastic(AwareStatic):
             which the static value will be used in calculations
         iterations: int
             Number of iterations to use in the Monte Carlo Simulations
-
+        caps: dict {str: float}
+            Upper bound to programatically impose on GSD2 values for specified
+            parameters
         """
         AwareStatic.__init__(self, base_dir_path)
+        self.sampled_variables = [
+            "avail_delta_wo_model_uncertainty",
+            "avail_net_wo_model_uncertainty",
+            "domestic",
+            "electricity",
+            "irrigation",
+            "livestock",
+            "manufacturing",
+            "pastor",
+            "model_uncertainty"
+        ]
+
         self.consider_certain = consider_certain
         self.sim_name = sim_name
+        self.caps = caps
         self.specify_MC_paths()
         self.generate_base_log_file(consider_certain, iterations)
         self.iterations = self.log['iterations']
+        self.dtype = dtype
         self.check_if_samples_generated()
         if self.samples_generated:
             print("Samples already exist.")
@@ -140,20 +160,21 @@ class AwareStochastic(AwareStatic):
         self.graphs_dir = self.sim_dir / "graphs"
         self.graphs_dir.mkdir(exist_ok=True)
 
-
     def check_if_samples_generated(self):
         samples_exist = True
         right_number_of_iterations = True
         sampled_files_available = [f for f in self.samples_dir.iterdir()]
         indices_files_available = [f for f in self.indices_dir.iterdir()]
-        required_variables = [f for f in self.given_variable_names if f not in ['area', 'uncertainty']]
-        for variable in required_variables:
+        required_variables = [f for f in self.sampled_variables] + ['avail_net', 'avail_delta']
+        variable_id = 0
+        while samples_exist and right_number_of_iterations and variable_id<len(required_variables):
+            variable = required_variables[variable_id]
+            print("---checking samples for {}".format(variable))
             samples_exist *= self.samples_dir / "{}.npy".format(variable) in sampled_files_available
             samples_exist *= self.indices_dir / "{}.pickle".format(variable) in indices_files_available
-        if samples_exist:
-            right_number_of_iterations *= np.load(self.samples_dir / "{}.npy".format(variable)).shape[1] == self.iterations
-        else:
-            pass
+            if samples_exist:
+                right_number_of_iterations *= np.load(self.samples_dir / "{}.npy".format(variable)).shape[1] == self.iterations
+            variable_id += 1
         self.samples_generated = samples_exist
         self.right_number_of_samples = right_number_of_iterations
 
@@ -224,9 +245,9 @@ class AwareStochastic(AwareStatic):
                 ]
             uncertainty_base = UncertaintyBase.from_dicts(*stats_arrays_input_dicts)
             rng = MCRandomNumberGenerator(uncertainty_base)
-            arr = np.zeros(shape=[df_only_uncertain.shape[0], self.iterations])
+            arr = np.zeros(shape=[df_only_uncertain.shape[0], self.iterations], dtype=self.dtype)
             for iteration in range(self.iterations):
-                arr[:, iteration] = next(rng)
+                arr[:, iteration] = next(rng).astype(self.dtype)
 
             if 'month' in df_only_uncertain.columns:
                 indices_as_arr = np.array([df_only_uncertain['BAS34S_ID'], df_only_uncertain['month']]).T
@@ -234,11 +255,65 @@ class AwareStochastic(AwareStatic):
             else:
                 indices_as_list = list(df_only_uncertain['BAS34S_ID'].values)
 
-            np.save(self.samples_dir / "{}.npy".format(variable), arr)
-            with open(self.indices_dir / "{}.pickle".format(variable), 'wb') as f:
+            name = variable + "_wo_model_uncertainty" if variable in ['avail_net', 'avail_delta'] else variable
+            np.save(self.samples_dir / "{}.npy".format(name), arr)
+            with open(self.indices_dir / "{}.pickle".format(name), 'wb') as f:
                 pickle.dump(indices_as_list, f)
-            print("\t{} samples taken for {}".format(self.iterations, variable))
+            print("\t{} samples taken for {}".format(self.iterations, name))
+        self.sample_model_uncertainty()
+        self.add_model_uncertainty_to_avail()
         self.samples_generated = True
+
+    def sample_model_uncertainty(self):
+        """ Sample model uncertainty for avail_delta and avail_net"""
+        with open(self.filtered_pickles / 'model_uncertainty.pickle', 'rb') as f:
+            model_uncertainty_df = pickle.load(f)
+        if self.caps and 'model_uncertainty' in self.caps:
+            model_uncertainty_df[model_uncertainty_df>self.caps['model_uncertainty']] = self.caps['model_uncertainty']
+        stacked_df = model_uncertainty_df.stack().reset_index()
+        stacked_df.rename(columns={'level_1': 'month', 0: 'value'}, inplace=True)
+        gsd2_to_scale = lambda x: np.log(np.sqrt(x))
+        stacked_df['scale'] = gsd2_to_scale(stacked_df['value'])
+        stats_arrays_input_dicts = [{'loc': 0, 'scale': stacked_df.loc[i, 'scale'], 'uncertainty_type': 2} for i in
+                                    stacked_df.index]
+        uncertainty_base = UncertaintyBase.from_dicts(*stats_arrays_input_dicts)
+        rng = MCRandomNumberGenerator(uncertainty_base)
+        arr = np.zeros(shape=[stacked_df.shape[0], self.iterations], dtype=self.dtype)
+        for iteration in range(self.iterations):
+            arr[:, iteration] = next(rng).astype(self.dtype)
+        indices_as_arr = np.array([stacked_df['BAS34S_ID'], stacked_df['month']]).T
+        indices_as_list = [(indices_as_arr[i, 0], indices_as_arr[i, 1]) for i in range(indices_as_arr.shape[0])]
+        np.save(self.samples_dir / "{}.npy".format('model_uncertainty'), arr)
+        with open(self.indices_dir / "{}.pickle".format('model_uncertainty'), 'wb') as f:
+            pickle.dump(indices_as_list, f)
+        print("\t{} samples taken for {}".format(self.iterations, 'model_uncertainty'))
+
+    def add_model_uncertainty_to_avail(self):
+        """ Add model uncertainty to avail_delta and avail_net
+        """
+        print("Adding model uncertainty")
+        model_uncertainty_df = pd.DataFrame(
+            index=pickle.load(open(self.indices_dir/'model_uncertainty.pickle', 'rb')),
+            data=np.load(self.samples_dir/'model_uncertainty.npy')
+        )
+        for variable in ['avail_net', 'avail_delta']:
+            param_uncertainty_df = pd.DataFrame(
+                index=pickle.load(open(self.indices_dir / '{}_wo_model_uncertainty.pickle'.format(variable), 'rb')),
+                data=np.load(self.samples_dir / '{}_wo_model_uncertainty.npy'.format(variable)),
+            )
+            # Make sure that we have model uncertainty samples for all basin-months with parameter uncertainty
+            assert 0 == np.setdiff1d(
+                param_uncertainty_df.index.tolist(),
+                model_uncertainty_df.index.tolist(),
+                assume_unique=True).size
+            # Make sure that all the basin-months for which we do not have parameter uncertainty are indeed for basin-months with 0 values
+            det_df = pd.read_pickle(self.filtered_pickles / "{}.pickle".format(variable)).stack()
+            assert det_df.loc[model_uncertainty_df.index.difference(det_df.index)].sum() == 0
+            product = (param_uncertainty_df * model_uncertainty_df).reindex(param_uncertainty_df.index).dropna(axis=1)
+            with open(self.indices_dir/"{}.pickle".format(variable), "wb") as f:
+                pickle.dump(product.index.to_list(), f)
+            np.save(self.samples_dir/"{}.npy".format(variable), product.values.astype(self.dtype))
+
 
     @staticmethod
     def update_df_with_sample(sample_index, sample_values, det_df):
@@ -327,7 +402,8 @@ class AwareStochastic(AwareStatic):
                 data_d_MC[variable] = self.det_data[variable]
         return data_d_MC
 
-    def calculate_AMD_samples(self, results_to_save=['AMD_world', 'AMD_world_over_AMD_i', 'irrigation', 'HWC']):
+    def calculate_AMD_samples(self, results_to_save=['AMD_world', 'AMD_world_over_AMD_i', 'irrigation', 'HWC'],
+                              iteration_subset_id=None, total_iteration_subsets=None):
         """ Calculate results for a given list of results.
 
         Results are stored as float (AMD_world) or numpy arrays (all others), with
@@ -343,6 +419,10 @@ class AwareStochastic(AwareStatic):
         All results are stored in the MC.raw directory.
         Results already on file are not recalculated. To recalculate a given result, first delete
         the existing results.
+
+        If iteration_subset_id and total_iteration_subsets are specified, the
+        full range of required iterations is split up, and only iterations for
+        the specified range are generated.
         """
         # Load self.samples_dict and self.samples_indices_dict
         self.prep_samples()
@@ -355,9 +435,27 @@ class AwareStochastic(AwareStatic):
             result_path.mkdir(parents=True, exist_ok=True)
             already_calculated[wanted_result] = [find_iteration(result)
                                                  for result in os.listdir(result_path)]
-        print("ready to start with ", wanted_result, len(already_calculated[wanted_result]), "already calculated")
+        if total_iteration_subsets is not None:
+            if iteration_subset_id is not None:
+                chunks = lambda l, n: [l[i:i + n] for i in range(0, len(l), n)]
+                its_to_calculate = chunks(range(self.iterations), ceil(self.iterations/total_iteration_subsets))[iteration_subset_id]
+            else:
+                print("total_iteration_subsets specified, but not iteration_subset_id: calculating for all {} iterations".format(self.iterations))
+                its_to_calculate = range(self.iterations)
+        else:
+            if iteration_subset_id is not None:
+                print("iteration_subset_id specified, but not total_iteration_subsets: calculating for all {} iterations".format(self.iterations))
+            its_to_calculate = range(self.iterations)
+        already_calculated[wanted_result] = [i for i in its_to_calculate if i in already_calculated[wanted_result]]
+        print(
+            "ready to start with {}, {} of {} already calculated".format(
+                wanted_result,
+                len(already_calculated[wanted_result]),
+                len(its_to_calculate)
+            )
+        )
         # Generate results
-        for i in pyprind.prog_bar(range(self.iterations)):
+        for i in pyprind.prog_bar(its_to_calculate, stream=sys.stderr):
             iteration_done = {wanted_result: i in already_calculated[wanted_result]
                               for wanted_result in results_to_save
                               }
@@ -446,7 +544,7 @@ class AwareStochastic(AwareStatic):
                 for i in range(iterations):
                     f = ordered_files[i]
                     arr[i] = np.load(os.path.join(orig_dir, f)).item()
-                np.save(os.path.join(dest_dir, "{}.npy".format(result_type)), arr)
+                np.save(os.path.join(dest_dir, "{}.npy".format(result_type)), arr.astype(self.dtype))
 
     def aggregate_2d_results(self, result_type):
         """ Convert n variable x 1 iteration to 1 variable x m iteration arrays"""
@@ -476,7 +574,7 @@ class AwareStochastic(AwareStatic):
             sample_dict = {file_name: np.load(str(orig_dir / file_name), mmap_mode='r')
                            for file_name in ordered_files
                            }
-            for i in pyprind.prog_bar(range(len(indices))):
+            for i in pyprind.prog_bar(range(len(indices)), stream=sys.stderr):
                 index = indices[i]
                 for j, col in enumerate(columns):
                     if "{}_{}_{}.npy".format(result_type, index, col) in all_files_in_dest_dir:
@@ -486,7 +584,7 @@ class AwareStochastic(AwareStatic):
                             arr = np.zeros(shape=iterations)
                             for iteration, f in enumerate(ordered_files):
                                 arr[iteration] = sample_dict[f][i, j]
-                            np.save(os.path.join(dest_dir, "{}_{}_{}.npy".format(result_type, index, col)), arr)
+                            np.save(os.path.join(dest_dir, "{}_{}_{}.npy".format(result_type, index, col)), arr.astype(self.dtype))
                         except Exception as err:
                             print("Failure with: ", i, j, str(err))
 
@@ -501,14 +599,28 @@ class AwareStochastic(AwareStatic):
         month_cf_folder.mkdir(exist_ok=True, parents=True)
         np.save(month_cf_folder / "cf_{}_{}.npy".format(basin, month), cf_arr)
 
-    def calculate_all_single_month_cfs_stochastic(self, lower_bound, upper_bound, overwrite=False):
+    def calculate_all_single_month_cfs_stochastic(self, lower_bound, upper_bound, overwrite=False,
+                                                  AMD_subset_id=None, total_AMD_subsets=None):
         """ Calculate all monthly cfs for specified lower and upper bounds"""
 
         # Get list of basins
         get_basin = lambda s: int(s[::-1][8:][::-1].replace('AMD_world_over_AMD_i_', ""))
         orig_dir = self.aggregated_samples / "AMD_world_over_AMD_i"
         dest_dir = self.cf_dir / "{}_{}".format(lower_bound, upper_bound).replace(".", "_") / "monthly"
-        for AMD in pyprind.prog_bar([f for f in orig_dir.iterdir()]):
+        all_AMD = [f for f in orig_dir.iterdir()]
+        if total_AMD_subsets is not None:
+            if AMD_subset_id is not None:
+                chunks = lambda l, n: [l[i:i + n] for i in range(0, len(l), n)]
+                AMD_to_process = chunks(all_AMD, ceil(len(all_AMD)/total_AMD_subsets))[AMD_subset_id]
+            else:
+                print("total_AMD_subsets specified, but not AMD_subset_id: calculating for all {} AMD".format(len(all_AMD)))
+                AMD_to_process = all_AMD
+        else:
+            if AMD_subset_id is not None:
+                print("AMD_subset_id specified, but not total_AMD_subsets: calculating for all  {} AMD".format(len(all_AMD)))
+            AMD_to_process = all_AMD
+
+        for AMD in pyprind.prog_bar(AMD_to_process, stream=sys.stderr):
             basin = get_basin(AMD.name)
             month = AMD.name[-7:-4]
             if (dest_dir / "cf_{}_{}.npy".format(basin, month)).is_file() and not overwrite:
@@ -516,7 +628,7 @@ class AwareStochastic(AwareStatic):
             else:
                 self.calculate_single_month_cf_stochastic(basin, month, lower_bound, upper_bound)
 
-    def calculate_cfs_average(self, lower_bound, upper_bound, overwrite=False):
+    def calculate_cfs_average(self, lower_bound, upper_bound, overwrite=False, basin_subset_id=None, total_basin_subsets=None):
         """ Calculate average cfs for given bounds
 
         Monthly cfs must be calculated first,
@@ -536,8 +648,22 @@ class AwareStochastic(AwareStatic):
         non_agri_dest_dir = self.cf_dir / \
                             "{}_{}".format(lower_bound, upper_bound).replace(".", "_") / "average_non_agri"
         non_agri_dest_dir.mkdir(exist_ok=True)
-        print("Will generate average cfs for {} basins".format(len(self.basins)))
-        for basin in pyprind.prog_bar(self.basins):
+        if total_basin_subsets is not None:
+            if basin_subset_id is not None:
+                chunks = lambda l, n: [l[i:i + n] for i in range(0, len(l), n)]
+                basins_to_calculate = chunks(self.basins, ceil(len(self.basins)/total_basin_subsets))[basin_subset_id]
+            else:
+                print("total_basin_subsets specified, but not basin_subset_id: calculating for all {} iterations".format(self.basins))
+                basins_to_calculate = self.basins
+        else:
+            if basin_subset_id is not None:
+                print("basin_subset_id specified, but not total_basin_subsets: calculating for all {} basins".format(self.basins))
+            basins_to_calculate = self.basins
+        print("Will generate average cfs for {} basins".format(len(basins_to_calculate)))
+
+
+
+        for basin in pyprind.prog_bar(basins_to_calculate, stream=sys.stderr):
             unknown_exists = (unknown_dest_dir / "cf_average_unknown_{}.npy".format(basin)).is_file()
             agri_exists = (agri_dest_dir/ "cf_average_agri_{}.npy".format(basin)).is_file()
             non_agri_exists = (non_agri_dest_dir/ "cf_average_non_agri_{}.npy".format(basin)).is_file()

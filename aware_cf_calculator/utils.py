@@ -9,7 +9,9 @@ def get_stats(samples):
         "Q1": np.percentile(samples, 25),
         "Q3": np.percentile(samples, 75),
         "97.5%ile": np.percentile(samples, 97.5),
-        "sd": np.std(samples)
+        "sd": np.std(samples),
+        "mean": np.mean(samples),
+        "median": np.median(samples)
     }
 
 

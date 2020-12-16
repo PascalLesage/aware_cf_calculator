@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import shutil
 import copy
+from warnings import warn
 
 
 class AwareStatic:
@@ -133,12 +134,17 @@ class AwareStatic:
                 "Data has not been imported, and no path to an Excel file has been supplied"
             self.raw_data_file = Path(raw_data_fp)
             if not self.raw_data_file.parent == self.base_dir / "extracted":
-                shutil.copyfile(str(self.raw_data_file), str(self.base_dir / "extracted" / self.raw_data_file.name))
+                new_location = self.base_dir / "extracted" / "AWARE_base_data.xlsx"
+                shutil.copyfile(str(self.raw_data_file), str(new_location))
+                self.imported_raw_data_file = new_location
             self.import_raw_files()
             self.filter_files()
             self.xls_parsed_and_saved=True
         else:
             print("Data already imported")
+            self.imported_raw_data_file = self.base_dir / "extracted" / "AWARE_base_data.xlsx"
+            if not self.imported_raw_data_file.is_file():
+                warn("The imported raw data file is not found in its expected location")
         self.set_static_attribute_dict()
         self.set_basins_and_months_attributes()
         self.check_results_exist()
@@ -265,7 +271,7 @@ class AwareStatic:
         assert self.raw_data_file.is_file(), "No file found at {}"
         assert self.raw_data_file.suffix == ".xlsx", "The raw data file should be an Excel"
         xls = pd.ExcelFile(self.raw_data_file)
-        sheets_to_get = self.given_variable_names + ['uncertainty', 'filters']
+        sheets_to_get = self.given_variable_names + ['uncertainty', 'filters', 'model_uncertainty']
         for variable_name in sheets_to_get:
             assert variable_name in xls.sheet_names, "Sheet {} missing".format(variable_name)
 
@@ -281,7 +287,7 @@ class AwareStatic:
         self.filters_df = pd.read_pickle(self.raw_pickles / "filters.pickle")
         print("\nFiltering out unwanted basins")
         self.filters_df['total_filter'] = self.filters_df.all(axis=1)
-        variables_to_strip = self.given_variable_names + ['uncertainty']
+        variables_to_strip = self.given_variable_names + ['uncertainty', 'model_uncertainty']
         for v in variables_to_strip:
             print("...{}".format(v))
             unfiltered = pd.read_pickle(self.raw_pickles / "{}.pickle".format(v))
